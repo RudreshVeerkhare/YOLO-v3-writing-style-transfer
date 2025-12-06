@@ -14,11 +14,13 @@ interface ProgressTimelineProps {
   startTime?: number; // Unix timestamp when pipeline started
 }
 
-const STAGES: { id: PipelineStage; label: string; icon: string }[] = [
-  { id: 'ingestion', label: 'Fetch Source', icon: '📥' },
+const STAGES: { id: PipelineStage; label: string; icon: string; optional?: boolean }[] = [
+  { id: 'fetch', label: 'Download Paper', icon: '📡' },
+  { id: 'ingestion', label: 'Extract Content', icon: '📥' },
   { id: 'structure', label: 'Parse Structure', icon: '🔍' },
   { id: 'semantics', label: 'Extract Meaning', icon: '🧠' },
-  { id: 'research', label: 'Fill Gaps', icon: '🔬' },
+  { id: 'research', label: 'Research & Answer', icon: '🔬' },
+  { id: 'websearch', label: 'Web Search', icon: '🌐', optional: true },
   { id: 'rewrite', label: 'YOLO Rewrite', icon: '✍️' },
   { id: 'figures', label: 'Place Figures', icon: '🖼️' },
   { id: 'critique', label: 'Review & Fix', icon: '👀' },
@@ -85,7 +87,10 @@ export const ProgressTimeline: React.FC<ProgressTimelineProps> = ({
     }
   }, [currentStage]);
   
-  const getStageStatus = (stageId: PipelineStage): 'pending' | 'active' | 'complete' | 'error' => {
+  const getStageStatus = (stageId: PipelineStage): 'pending' | 'active' | 'complete' | 'error' | 'skipped' => {
+    const stageLogs = logsByStage[stageId] || [];
+    const stageConfig = STAGES.find(s => s.id === stageId);
+    
     if (currentStage === 'error') {
       const stageIndex = STAGE_ORDER.indexOf(stageId);
       if (stageIndex < currentIndex) return 'complete';
@@ -93,13 +98,22 @@ export const ProgressTimeline: React.FC<ProgressTimelineProps> = ({
       return 'pending';
     }
     
-    // When done, all stages including 'done' are complete
+    // When done, check if optional stages were skipped (no logs means skipped)
     if (currentStage === 'done') {
+      if (stageConfig?.optional && stageLogs.length === 0) {
+        return 'skipped';
+      }
       return 'complete';
     }
     
     const stageIndex = STAGE_ORDER.indexOf(stageId);
-    if (stageIndex < currentIndex) return 'complete';
+    if (stageIndex < currentIndex) {
+      // Check if optional stage was skipped
+      if (stageConfig?.optional && stageLogs.length === 0) {
+        return 'skipped';
+      }
+      return 'complete';
+    }
     if (stageIndex === currentIndex) return 'active';
     return 'pending';
   };
@@ -200,10 +214,16 @@ export const ProgressTimeline: React.FC<ProgressTimelineProps> = ({
               <button 
                 className="stage-header"
                 onClick={() => toggleSection(stage.id)}
-                disabled={status === 'pending'}
+                disabled={status === 'pending' || status === 'skipped'}
               >
                 <span className="stage-icon">{stage.icon}</span>
-                <span className="stage-label">{stage.label}</span>
+                <span className="stage-label">
+                  {stage.label}
+                  {stage.optional && <span className="stage-optional-badge">optional</span>}
+                </span>
+                {status === 'skipped' && (
+                  <span className="stage-skipped-label">skipped</span>
+                )}
                 {hasLogs && (
                   <span className="stage-log-count">
                     {stageLogs.length} {stageLogs.length === 1 ? 'log' : 'logs'}
@@ -211,6 +231,7 @@ export const ProgressTimeline: React.FC<ProgressTimelineProps> = ({
                 )}
                 <span className="stage-status-icon">
                   {status === 'complete' && '✓'}
+                  {status === 'skipped' && '–'}
                   {status === 'active' && <span className="spinner-small"></span>}
                   {status === 'error' && '✗'}
                 </span>

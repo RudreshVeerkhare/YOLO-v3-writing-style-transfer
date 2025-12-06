@@ -1,0 +1,506 @@
+/* ============================================================
+   Publish Modal Styles - Light Theme
+   ============================================================ */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  border: 1px solid #e0e0e0;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #333;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: #888;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: #333;
+}
+
+.modal-body {
+  padding: 1.5rem;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Paper Preview */
+.paper-preview {
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.paper-preview h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  color: #333;
+  line-height: 1.4;
+}
+
+.paper-preview .paper-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+/* Info Box */
+.publish-info {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.publish-info p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #856404;
+}
+
+/* Form Groups */
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #b31b1b;
+  box-shadow: 0 0 0 2px rgba(179, 27, 27, 0.1);
+}
+
+.form-group input::placeholder {
+  color: #999;
+}
+
+/* Version Note */
+.version-note {
+  display: flex;
+  gap: 0.75rem;
+  background: #f5f5f5;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+}
+
+.version-note .info-icon {
+  flex-shrink: 0;
+}
+
+.version-note p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+/* Buttons */
+.cancel-btn {
+  padding: 0.75rem 1.25rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.cancel-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.publish-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #b31b1b 0%, #8a1515 100%);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.publish-btn:hover {
+  background: linear-gradient(135deg, #8a1515 0%, #6a1010 100%);
+}
+
+.done-btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  background: #22c55e;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.done-btn:hover {
+  background: #16a34a;
+}
+
+.retry-btn {
+  padding: 0.75rem 1.5rem;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  background: transparent;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 1rem;
+}
+
+.retry-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* Publishing State */
+.publishing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.publishing-state .spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #eee;
+  border-top-color: #b31b1b;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.publishing-state p {
+  color: #666;
+  font-size: 0.95rem;
+}
+
+/* Success State */
+.success-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.success-state .success-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.success-state h3 {
+  margin: 0 0 0.5rem 0;
+  color: #22c55e;
+}
+
+.success-state > p {
+  margin: 0 0 1.5rem 0;
+  color: #666;
+}
+
+.share-url {
+  display: flex;
+  width: 100%;
+  margin-bottom: 1rem;
+  background: #f5f5f5;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+}
+
+.share-url input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: none;
+  background: transparent;
+  color: #333;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.share-url input:focus {
+  outline: none;
+}
+
+.copy-btn {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-left: 1px solid #ddd;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.copy-btn:hover {
+  background: #f0f0f0;
+}
+
+.share-buttons {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.twitter-btn {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #1da1f2;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.twitter-btn:hover {
+  background: #0c8bd9;
+}
+
+.view-btn {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  text-decoration: none;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.view-btn:hover {
+  background: #f5f5f5;
+}
+
+/* Error State */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.error-state .error-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.error-state h3 {
+  margin: 0 0 0.5rem 0;
+  color: #ef4444;
+}
+
+.error-state > p {
+  margin: 0;
+  color: #666;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+/* Not Configured State */
+.not-configured {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.not-configured .warning-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.not-configured h3 {
+  margin: 0 0 0.5rem 0;
+  color: #f59e0b;
+}
+
+.not-configured p {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.not-configured code {
+  background: #f5f5f5;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #d97706;
+}
+
+/* Generation Config Section */
+.generation-config {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.generation-config h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem 1rem;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.config-label {
+  color: #666;
+}
+
+.config-value {
+  font-weight: 500;
+  color: #333;
+}
+
+.config-value.cost {
+  color: #b31b1b;
+  font-weight: 600;
+}
+
+/* Tags Container */
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+  min-height: 42px;
+  align-items: center;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: #e3f2fd;
+  color: #1565c0;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.tag-chip:hover {
+  background: #bbdefb;
+}
+
+.tag-remove {
+  font-weight: bold;
+  margin-left: 0.25rem;
+  opacity: 0.6;
+}
+
+.tag-chip:hover .tag-remove {
+  opacity: 1;
+}
+
+.tag-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.85rem;
+  padding: 0.25rem;
+  min-width: 80px;
+  flex: 1;
+}
+
+.tag-input::placeholder {
+  color: #999;
+}
+
+.form-hint {
+  margin: 0.25rem 0 0 0;
+  font-size: 0.75rem;
+  color: #888;
+}

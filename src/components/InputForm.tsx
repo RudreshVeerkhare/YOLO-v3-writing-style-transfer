@@ -25,12 +25,21 @@ export interface SubmitData {
   };
 }
 
+export interface EstimateProgressCallbacks {
+  onEstimateStart: () => void;
+  onStageChange: (stage: 'fetch' | 'ingestion' | 'structure') => void;
+  onLog: (stage: 'fetch' | 'ingestion' | 'structure', message: string) => void;
+  onProgress: (progress: number) => void;
+  onEstimateComplete: () => void;
+}
+
 interface InputFormProps {
   onSubmit: (data: SubmitData) => void;
   isRunning: boolean;
+  onEstimateProgress?: EstimateProgressCallbacks;
 }
 
-export const InputForm: React.FC<InputFormProps> = ({ onSubmit, isRunning }) => {
+export const InputForm: React.FC<InputFormProps> = ({ onSubmit, isRunning, onEstimateProgress }) => {
   const [arxivId, setArxivId] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [error, setError] = useState('');
@@ -69,18 +78,22 @@ export const InputForm: React.FC<InputFormProps> = ({ onSubmit, isRunning }) => 
     }
     
     setIsFetching(true);
+    onEstimateProgress?.onEstimateStart();
     
     try {
       const { estimate, bundle, structured } = await prefetchAndEstimateCost(
         normalizedId,
-        { critiqueIterations, enableWebSearch }
+        { critiqueIterations, enableWebSearch },
+        onEstimateProgress
       );
       
       setCostEstimate(estimate);
       setPrefetchedBundle(bundle);
       setPrefetchedStructured(structured);
+      onEstimateProgress?.onEstimateComplete();
     } catch (e) {
       setError(`Failed to fetch paper: ${e instanceof Error ? e.message : String(e)}`);
+      onEstimateProgress?.onEstimateComplete();
     } finally {
       setIsFetching(false);
     }

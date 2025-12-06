@@ -12,38 +12,51 @@ const CORS_PROXIES = [
   'https://api.allorigins.win/raw?url=',
 ];
 
+export type FetchProgressCallback = (message: string) => void;
+
 /**
  * Fetches and extracts TeX source from arXiv
  */
-export async function fetchAndExtractTeX(arxivId: string): Promise<PaperTeXBundle> {
+export async function fetchAndExtractTeX(
+  arxivId: string,
+  onProgress?: FetchProgressCallback
+): Promise<PaperTeXBundle> {
   const sourceUrl = `https://arxiv.org/e-print/${arxivId}`;
+  const log = onProgress || (() => {});
   
   let tarballData: ArrayBuffer | null = null;
   let lastError: Error | null = null;
   
   // Try direct fetch first (may work with browser extensions)
+  log(`Connecting to arXiv for paper ${arxivId}...`);
   try {
     const response = await fetch(sourceUrl);
     if (response.ok) {
+      log('Direct connection successful, downloading...');
       tarballData = await response.arrayBuffer();
+      log(`Downloaded ${Math.round(tarballData.byteLength / 1024)} KB`);
     }
   } catch (e) {
-    console.log('Direct fetch failed, trying CORS proxies...');
+    log('Direct fetch blocked, trying CORS proxy...');
   }
   
   // Try CORS proxies
   if (!tarballData) {
-    for (const proxy of CORS_PROXIES) {
+    for (let i = 0; i < CORS_PROXIES.length; i++) {
+      const proxy = CORS_PROXIES[i];
+      log(`Trying proxy ${i + 1}/${CORS_PROXIES.length}...`);
       try {
         const proxyUrl = `${proxy}${encodeURIComponent(sourceUrl)}`;
         const response = await fetch(proxyUrl);
         if (response.ok) {
+          log('Proxy connection successful, downloading...');
           tarballData = await response.arrayBuffer();
+          log(`Downloaded ${Math.round(tarballData.byteLength / 1024)} KB`);
           break;
         }
       } catch (e) {
         lastError = e as Error;
-        console.log(`Proxy ${proxy} failed, trying next...`);
+        log(`Proxy ${i + 1} failed, ${i < CORS_PROXIES.length - 1 ? 'trying next...' : 'no more proxies'}`);
       }
     }
   }
@@ -57,7 +70,9 @@ export async function fetchAndExtractTeX(arxivId: string): Promise<PaperTeXBundl
   }
   
   // Extract the tarball
+  log('Extracting archive...');
   const files = await extractTarGz(new Uint8Array(tarballData));
+  log(`Extracted ${Object.keys(files).length} files`);
   
   // Separate TeX files from assets
   const texFiles: Record<string, string> = {};

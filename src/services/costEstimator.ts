@@ -25,9 +25,10 @@
 // 2. STAGE-BY-STAGE CALCULATION
 //    Each pipeline stage is estimated separately:
 //
-//    a) Semantic Analysis (gpt-5-mini)
+//    a) Semantic Analysis (gpt-5.1)
 //       - Input: system prompt (~800 tokens) + full paper content
 //       - Output: ~30% of input (structured skeleton)
+//       - Uses best model for accurate understanding (foundation for all downstream)
 //
 //    b) Research Questions (gpt-5-nano)  
 //       - Input: system prompt (~400 tokens) + 50% of paper
@@ -43,16 +44,21 @@
 //       - Output: ~400 tokens
 //       - Plus: $0.01 per web search call (typically 2-3 calls)
 //
-//    e) YOLO Rewrite (gpt-5-mini)
+//    e) Style Blueprint (gpt-5-mini) - NEW!
+//       - Plans creative direction before rewriting
+//       - Input: ~800 token prompt + skeleton + section list
+//       - Output: ~1500 tokens (full blueprint with section plans)
+//
+//    f) YOLO Rewrite (gpt-5-mini)
 //       - Batched: ~3 sections per batch
-//       - Each batch: system prompt (1200 tokens) + context (30% of paper) + sections
+//       - Each batch: system prompt (1200 tokens) + blueprint context + sections
 //       - Output: ~120% of section content (rewrites tend to be longer)
 //
-//    f) Figure Placement (gpt-5-nano) - if figures exist
+//    g) Figure Placement (gpt-5-nano) - if figures exist
 //       - Input: ~400 tokens + 100 per figure + 50 per section
 //       - Output: ~50 tokens per figure
 //
-//    g) Critique Loop (gpt-5.1 + gpt-5-mini)
+//    h) Critique Loop (gpt-5.1 + gpt-5-mini)
 //       - Per iteration:
 //         * Critique: prompt + full rewritten content → ~15% output
 //         * Patch: fixes for ~30% of sections (halving each iteration)
@@ -89,10 +95,11 @@ const TOKENS_PER_CHAR = 0.3;
  * These should match the actual models used in agents.ts
  */
 const PIPELINE_MODELS = {
-  semanticMap: 'gpt-5-mini',      // Needs good reasoning for structure
+  semanticMap: 'gpt-5.1',          // Best reasoning for accurate paper understanding
   researchQuestions: 'gpt-5-mini', // Upgraded from nano - needs capacity for large papers
   researchAnswers: 'gpt-5-mini',   // Upgraded from nano - needs capacity for detailed answers
   webSearch: 'gpt-5',              // Web search requires specific model
+  styleBlueprint: 'gpt-5-mini',    // Creative planning - needs quality
   rewrite: 'gpt-5-mini',           // Main rewriting - needs quality
   figurePlacement: 'gpt-5-nano',   // Simple mapping task
   critique: 'gpt-5.1',             // Needs strong reasoning for accuracy
@@ -108,6 +115,7 @@ const BASE_PROMPT_TOKENS = {
   researchQuestions: 400,  // Question generation prompt
   researchAnswers: 300,    // Answer generation prompt
   webSearch: 500,          // Web search coordination prompt
+  styleBlueprint: 1500,    // Style blueprint prompt (comprehensive guidance)
   rewrite: 1200,           // Full YOLO style guide (~1100 tokens)
   figurePlacement: 400,    // Figure mapping prompt
   critique: 600,           // Accuracy review prompt
@@ -125,6 +133,7 @@ const OUTPUT_MULTIPLIERS = {
   researchQuestions: 0.2, // Questions are compact
   researchAnswers: 0.5,   // Answers are moderately detailed
   webSearch: 0.4,         // Summaries of findings
+  styleBlueprint: 0.8,    // Blueprint is substantial (section plans)
   rewrite: 1.2,           // Rewrites tend to be longer (more explanation)
   figurePlacement: 0.1,   // Just figure IDs and positions
   critique: 0.15,         // Issue list is compact
@@ -273,19 +282,42 @@ export function estimatePipelineCost(
     });
   }
   
-  // 5. YOLO Rewrite (batched, ~3-4 sections per batch)
+  // 5. Style Blueprint (plans creative direction before rewriting)
+  {
+    // Input: prompt + skeleton (~500 tokens) + section list (~50 tokens per section)
+    const skeletonTokens = 500;
+    const sectionListTokens = sectionCount * 50;
+    const inputTokens = BASE_PROMPT_TOKENS.styleBlueprint + skeletonTokens + sectionListTokens;
+    // Output: full blueprint with plans for each section
+    const outputTokens = Math.ceil(inputTokens * OUTPUT_MULTIPLIERS.styleBlueprint);
+    const cost = calculateStageCost(PIPELINE_MODELS.styleBlueprint, inputTokens, outputTokens);
+    stages.push({
+      name: 'Style Blueprint',
+      model: PIPELINE_MODELS.styleBlueprint,
+      inputTokens,
+      outputTokens,
+      requests: 1,
+      cost,
+    });
+  }
+  
+  // 6. YOLO Rewrite (batched, ~3-4 sections per batch)
   {
     const batchSize = 3;
     const batchCount = Math.ceil(sectionCount / batchSize);
     const tokensPerSection = Math.ceil(paperTokens / sectionCount);
-    const contextTokens = Math.ceil(paperTokens * 0.3); // Skeleton + paper context
+    // Context now includes blueprint guidance instead of full skeleton
+    const blueprintContextTokens = 400; // Shared blueprint context per batch
+    const sectionPlanTokens = 100; // Per-section plan tokens
     
     let totalInput = 0;
     let totalOutput = 0;
     
     for (let i = 0; i < batchCount; i++) {
       const sectionsInBatch = Math.min(batchSize, sectionCount - i * batchSize);
-      const batchInput = BASE_PROMPT_TOKENS.rewrite + contextTokens + (tokensPerSection * sectionsInBatch);
+      const batchInput = BASE_PROMPT_TOKENS.rewrite + blueprintContextTokens + 
+                         (sectionPlanTokens * sectionsInBatch) + 
+                         (tokensPerSection * sectionsInBatch);
       const batchOutput = Math.ceil(tokensPerSection * sectionsInBatch * OUTPUT_MULTIPLIERS.rewrite);
       totalInput += batchInput;
       totalOutput += batchOutput;
@@ -302,7 +334,7 @@ export function estimatePipelineCost(
     });
   }
   
-  // 6. Figure Placement (if figures exist)
+  // 7. Figure Placement (if figures exist)
   if (figureCount > 0) {
     const inputTokens = BASE_PROMPT_TOKENS.figurePlacement + (figureCount * 100) + (sectionCount * 50);
     const outputTokens = Math.ceil(figureCount * 50);
@@ -317,7 +349,7 @@ export function estimatePipelineCost(
     });
   }
   
-  // 7. Critique iterations
+  // 8. Critique iterations
   if (options.critiqueIterations > 0) {
     const rewrittenTokens = Math.ceil(paperTokens * 1.2);
     

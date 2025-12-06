@@ -11,6 +11,7 @@ import type {
   ResearchNote,
   FinalDocument,
   ExternalResearch,
+  GenerationConfig,
 } from '../types';
 import { cleanMathContent } from './texParser';
 
@@ -50,7 +51,8 @@ export function assembleFinalDocument(
   rewrittenSections: RewrittenSection[],
   figurePlacements: FigurePlacement[],
   researchNotes: ResearchNote[],
-  externalResearch?: ExternalResearch | null
+  externalResearch?: ExternalResearch | null,
+  generationConfig?: GenerationConfig
 ): FinalDocument {
   const html = buildHTML(
     bundle,
@@ -68,6 +70,15 @@ export function assembleFinalDocument(
       authors: bundle.metadata.authors,
       arxivId: bundle.arxivId,
       generationDate: new Date().toISOString(),
+      originalAbstract: bundle.metadata.abstract,
+      generationConfig: generationConfig || {
+        model: 'gpt-5.1',
+        critiqueIterations: 3,
+        webSearchEnabled: true,
+        estimatedCost: 0,
+        totalTokens: 0,
+        generationTimeMs: 0,
+      },
     },
   };
 }
@@ -80,7 +91,8 @@ export function assemblePartialDocument(
   bundle: PaperTeXBundle,
   structured: StructuredPaper,
   completedSections: RewrittenSection[],
-  totalSections: number
+  totalSections: number,
+  generationConfig?: GenerationConfig
 ): FinalDocument {
   const html = buildPartialHTML(
     bundle,
@@ -96,6 +108,15 @@ export function assemblePartialDocument(
       authors: bundle.metadata.authors,
       arxivId: bundle.arxivId,
       generationDate: new Date().toISOString(),
+      originalAbstract: bundle.metadata.abstract,
+      generationConfig: generationConfig || {
+        model: 'gpt-5.1',
+        critiqueIterations: 3,
+        webSearchEnabled: true,
+        estimatedCost: 0,
+        totalTokens: 0,
+        generationTimeMs: 0,
+      },
     },
   };
 }

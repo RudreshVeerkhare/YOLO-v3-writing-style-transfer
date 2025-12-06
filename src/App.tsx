@@ -3,14 +3,16 @@
 // ============================================================
 
 import { useState, useCallback } from 'react';
-import { InputForm, ProgressTimeline, DocumentViewer, UsageDisplay } from './components';
-import type { SubmitData } from './components/InputForm';
+import { Routes, Route, Link } from 'react-router-dom';
+import { InputForm, ProgressTimeline, DocumentViewer, UsageDisplay, GalleryPage, PaperViewPage, PaperEmbedPage } from './components';
+import type { SubmitData, EstimateProgressCallbacks } from './components/InputForm';
 import { runPipeline, runPipelineWithPrefetchedData } from './services/pipeline';
 import { globalUsageTracker } from './services/usageTracker';
 import type { PipelineStage, LogEntry, FinalDocument } from './types';
 import './App.css';
 
-function App() {
+// Main converter page component
+function ConverterPage() {
   // Pipeline state
   const [isRunning, setIsRunning] = useState(false);
   const [currentStage, setCurrentStage] = useState<PipelineStage>('idle');
@@ -82,18 +84,52 @@ function App() {
   const showTimeline = isRunning || currentStage !== 'idle';
   const showDocument = document !== null;
   
+  // Estimate progress callbacks - shows fetch/parse progress during cost estimation
+  const estimateProgressCallbacks: EstimateProgressCallbacks = {
+    onEstimateStart: () => {
+      // Reset state when estimate begins
+      setCurrentStage('fetch');
+      setLogs([]);
+      setProgress(0);
+      setError(undefined);
+      setDocument(null);
+      setStartTime(Date.now());
+    },
+    onStageChange: (stage) => {
+      setCurrentStage(stage);
+    },
+    onLog: (stage, message) => {
+      setLogs(prev => [...prev, {
+        timestamp: new Date().toISOString(),
+        stage,
+        message,
+      }]);
+    },
+    onProgress: (p) => {
+      setProgress(p);
+    },
+    onEstimateComplete: () => {
+      // Keep the timeline visible but don't reset - user will see the estimate
+    },
+  };
+  
   return (
     <div className="app">
       <header className="app-header">
         <h1>🎯 YOLOv3-Style GPT-5.1 Paper Rewriter</h1>
         <p>Multi-agent pipeline for honest, accessible academic paper rewrites</p>
+        <Link to="/gallery" className="gallery-link">📚 Browse Gallery →</Link>
       </header>
       
       <main className="app-main">
         <div className={`app-layout ${showTimeline ? 'with-timeline' : ''} ${showDocument ? 'with-document' : ''}`}>
           {/* Left Panel - Input Form */}
           <aside className="panel-left">
-            <InputForm onSubmit={handleSubmit} isRunning={isRunning} />
+            <InputForm 
+              onSubmit={handleSubmit} 
+              isRunning={isRunning} 
+              onEstimateProgress={estimateProgressCallbacks}
+            />
           </aside>
           
           {/* Center Panel - Progress Timeline */}
@@ -125,6 +161,18 @@ function App() {
         </p>
       </footer>
     </div>
+  );
+}
+
+// Main App with routing
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<ConverterPage />} />
+      <Route path="/gallery" element={<GalleryPage />} />
+      <Route path="/gallery/:id" element={<PaperViewPage />} />
+      <Route path="/paper/:id" element={<PaperEmbedPage />} />
+    </Routes>
   );
 }
 

@@ -6,7 +6,7 @@
 // ============================================================
 // Task Type              | Model         | Reasoning? | Why
 // -----------------------|---------------|------------|---------------------------
-// Semantic extraction    | gpt-5-mini    | No         | Needs substantial output (skeleton is large)
+// Semantic extraction    | gpt-5.1       | No         | Best reasoning for accurate paper understanding
 // Research questions     | gpt-5-nano    | No         | Structured output (4x cheaper)
 // Research answers       | gpt-5-nano    | No         | Structured output (4x cheaper)
 // Web Research           | gpt-5         | Yes        | Agentic search with reasoning
@@ -31,6 +31,7 @@ import {
   SEMANTIC_MAP_AGENT_PROMPT,
   RESEARCH_QUESTIONS_AGENT_PROMPT,
   RESEARCH_ANSWER_AGENT_PROMPT,
+  STYLE_BLUEPRINT_AGENT_PROMPT,
   YOLO_REWRITER_AGENT_PROMPT,
   FIGURE_MAPPING_AGENT_PROMPT,
   CRITIQUE_AGENT_PROMPT,
@@ -40,6 +41,8 @@ import type {
   StructuredPaper,
   StructuredSection,
   SemanticSkeleton,
+  StyleBlueprint,
+  SectionStylePlan,
   ResearchQuestion,
   ResearchNote,
   RewrittenSection,
@@ -47,6 +50,7 @@ import type {
   CritiqueIssue,
   ExternalResearch,
   SemanticMapAgentResponse,
+  StyleBlueprintAgentResponse,
   ResearchQuestionsAgentResponse,
   ResearchAnswerAgentResponse,
   YOLORewriterAgentResponse,
@@ -83,7 +87,7 @@ function condensePaperForLLM(paper: StructuredPaper): object {
 
 /**
  * Semantic Map Agent - Extracts semantic skeleton
- * Model: gpt-5-mini (needs substantial output for complex papers)
+ * Model: gpt-5.1 (best reasoning for accurate understanding - foundation for everything)
  */
 export async function callSemanticMapAgent(
   client: OpenAI,
@@ -93,15 +97,78 @@ export async function callSemanticMapAgent(
   const condensed = condensePaperForLLM(structured);
   
   const response = await chatCompletion(client, {
-    model: 'gpt-5-mini',
+    model: 'gpt-5.1',
     systemPrompt: SEMANTIC_MAP_AGENT_PROMPT,
     userContent: `Extract semantic skeleton from this paper:\n\n${JSON.stringify(condensed, null, 2)}`,
-    maxTokens: 8000,
+    maxTokens: 16000,
     temperature: 0.3,
     responseFormat: 'json',
   });
   
   return parseJSONResponse<SemanticMapAgentResponse>(response);
+}
+
+/**
+ * Style Blueprint Agent - Plans the creative direction BEFORE rewriting
+ * Creates a cohesive vision for the entire paper rewrite
+ * Model: gpt-5-mini (creative planning needs good reasoning)
+ */
+export async function callStyleBlueprintAgent(
+  client: OpenAI,
+  structured: StructuredPaper,
+  skeleton: SemanticSkeleton,
+  researchNotes: ResearchNote[]
+): Promise<StyleBlueprint> {
+  console.log(`[StyleBlueprint] Planning creative direction for ${structured.sections.length} sections...`);
+  
+  // Prepare condensed research insights
+  const researchInsights = researchNotes.slice(0, 5).map(n => ({
+    question: n.questionId,
+    answer: n.answer.slice(0, 200),
+  }));
+  
+  // Prepare section list with context
+  const sectionList = structured.sections.map(s => ({
+    id: s.id,
+    title: s.title,
+    level: s.level,
+    preview: s.textBlocks[0]?.slice(0, 200) || '',
+  }));
+  
+  const input = {
+    paper: {
+      title: structured.title,
+      authors: structured.authors,
+      abstract: structured.abstract,
+    },
+    skeleton: {
+      problemStatement: skeleton.problemStatement,
+      motivation: skeleton.motivation,
+      contributions: skeleton.contributions,
+      methodSummary: skeleton.methodSummary,
+      explicitLimitations: skeleton.explicitLimitations,
+      inferredLimitations: skeleton.inferredLimitations,
+    },
+    researchInsights,
+    sections: sectionList,
+  };
+  
+  const response = await chatCompletion(client, {
+    model: 'gpt-5-mini',
+    systemPrompt: STYLE_BLUEPRINT_AGENT_PROMPT,
+    userContent: `Create a style blueprint for this paper:\n\n${JSON.stringify(input, null, 2)}`,
+    maxTokens: 8000,
+    temperature: 0.8, // Higher temp for creative planning
+    responseFormat: 'json',
+  });
+  
+  const blueprint = parseJSONResponse<StyleBlueprintAgentResponse>(response);
+  
+  console.log(`[StyleBlueprint] Created blueprint with ${blueprint.sectionPlans?.length || 0} section plans`);
+  console.log(`[StyleBlueprint] Narrative: ${blueprint.narrativeArc?.slice(0, 80)}...`);
+  console.log(`[StyleBlueprint] Running jokes: ${blueprint.runningJokes?.length || 0}`);
+  
+  return blueprint;
 }
 
 /**
@@ -133,7 +200,7 @@ export async function callResearchQuestionsAgent(
         model: 'gpt-5-mini', // Upgraded from nano - needs more capacity for larger papers
         systemPrompt: RESEARCH_QUESTIONS_AGENT_PROMPT,
         userContent: `Identify research gaps in this paper:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 4000,
+        maxTokens: 8000,
         responseFormat: 'json',
       });
       
@@ -185,7 +252,7 @@ export async function callResearchAnswerAgent(
         model: 'gpt-5-mini',
         systemPrompt: RESEARCH_ANSWER_AGENT_PROMPT,
         userContent: `Paper: "${paperTitle}"\n\nQuestion to answer:\n${JSON.stringify(question, null, 2)}`,
-        maxTokens: 2000,
+        maxTokens: 4000,
         responseFormat: 'json',
       });
       
@@ -228,48 +295,78 @@ export async function callWebResearchAgent(
   abstract: string
 ): Promise<ExternalResearch> {
   console.log(`[WebResearch] Agentic search for: ${paperTitle}`);
+  console.log(`[WebResearch] Authors: ${authors.join(', ')}`);
   
   // Extract key terms from abstract for better search
   const keyTerms = abstract.split(' ')
-    .filter(word => word.length > 6)
-    .slice(0, 8)
+    .filter(word => word.length > 6 && !word.match(/^(which|where|their|there|these|those|through|without|within|between|during|before|after|above|below)$/i))
+    .slice(0, 10)
     .join(' ');
   
+  // Clean up author names for better searching
+  const cleanAuthors = authors
+    .filter(a => a && a.trim().length > 2)
+    .map(a => a.trim().replace(/\s+/g, ' '))
+    .slice(0, 4);
+    
+  const hasAuthors = cleanAuthors.length > 0;
+  const authorSearchStr = cleanAuthors.join(', ');
+  
+  console.log(`[WebResearch] Clean authors for search: ${authorSearchStr}`);
+  console.log(`[WebResearch] Key terms: ${keyTerms}`);
+  
+  // Build more specific search queries based on available data
+  const authorQuery = hasAuthors 
+    ? `Search for information about these researchers: ${authorSearchStr}
+
+These researchers wrote the paper "${paperTitle}".
+
+I need SPECIFIC information about each author:
+1. Their current affiliation (university, company, research lab)
+2. Their research focus and expertise areas
+3. Their notable papers or contributions (with publication years if possible)
+4. Their academic background (PhD from where, previous positions)
+5. Any awards, fellowships, or recognition
+6. Links to their personal website, Google Scholar, or Twitter/X profiles
+
+Search strategies to try:
+- Search each author name individually if needed
+- Try "author name" + "researcher" or "professor" or "scientist"
+- Look for their Google Scholar or DBLP profiles
+- Search "author name" + research area from the paper
+
+Do NOT return generic statements. I need specific, verifiable facts with sources.`
+    : `Search for information about the authors of "${paperTitle}".
+
+Try to identify who wrote this paper and find information about them.`;
+
   // Run searches in parallel for speed
-  const [authorResult, discussionResult, applicationResult] = await Promise.all([
+  const searchPromises = [
     // Search for author information with specific instructions
-    webSearchCompletion(
-      client, 
-      `Find information about these researchers: ${authors.slice(0, 3).join(', ')}
-
-I need SPECIFIC information:
-- Their affiliations (university, company, lab)
-- Their notable previous work or papers
-- Any talks, interviews, or blog posts by them
-- Their expertise areas and research focus
-- Awards or recognition they've received
-
-Do NOT give generic statements. Find concrete facts with sources.`,
-      `Context: These authors wrote the paper "${paperTitle}"`
-    ),
+    webSearchCompletion(client, authorQuery, hasAuthors ? `Paper abstract: ${abstract.slice(0, 300)}` : undefined),
     
     // Search for discussions about the paper/topic
     webSearchCompletion(
       client,
-      `Find discussions, reviews, or commentary about the paper "${paperTitle}" or its key concepts.
+      `Find discussions, reviews, or commentary about the paper "${paperTitle}".
+
+Search strategies:
+1. Search the exact paper title in quotes
+2. Search key phrases from the paper: ${keyTerms}
+3. Look on academic discussion sites, blogs, and social media
 
 Look for:
-- Blog posts analyzing this paper
-- Twitter/X discussions by researchers
-- Reddit or HackerNews threads
-- YouTube videos explaining the paper
-- News articles about the research
-- Critiques or alternative viewpoints
+- Blog posts analyzing or explaining this paper
+- Twitter/X discussions by researchers about this work
+- Reddit r/MachineLearning, r/compsci, or r/science threads
+- HackerNews discussions
+- YouTube videos or podcasts discussing the paper
+- Academic blog posts (e.g., The Gradient, Distill, etc.)
+- News articles or press releases about the research
+- Critiques, rebuttals, or follow-up work
 
-Key concepts to search: ${keyTerms}
-
-Provide specific quotes and links. Tell me what people are saying about this work.`,
-      `Authors: ${authors.slice(0, 2).join(', ')}`
+Provide specific quotes and links. Tell me what people are actually saying about this work.`,
+      hasAuthors ? `Authors: ${authorSearchStr}` : undefined
     ),
     
     // Search for practical applications
@@ -277,19 +374,35 @@ Provide specific quotes and links. Tell me what people are saying about this wor
       client,
       `Find practical implementations, code, or applications related to "${paperTitle}".
 
+Search strategies:
+1. Search the paper title + "github"
+2. Search the paper title + "implementation"  
+3. Search key techniques: ${keyTerms}
+
 Look for:
-- GitHub repositories implementing this paper
-- Hugging Face models or demos
-- Tutorials or guides using these techniques
+- GitHub repositories implementing this paper (paperswithcode.com is great for this)
+- Hugging Face models, spaces, or demos
+- PyTorch/TensorFlow implementations
+- Tutorials, guides, or notebooks using these techniques
 - Companies or products using this technology
 - Benchmarks or comparisons with other methods
-- Real-world deployments
+- Real-world deployments or case studies
 
-Key techniques: ${keyTerms}
-
-Provide specific links to code repos, demos, and implementations.`
+Provide specific links to code repos, demos, and implementations. Include star counts for GitHub repos if available.`
     ),
-  ]);
+  ];
+  
+  const [authorResult, discussionResult, applicationResult] = await Promise.all(searchPromises);
+  
+  // Log individual search results for debugging
+  console.log(`[WebResearch] Author search: ${authorResult.content.length} chars, ${authorResult.citations.length} citations`);
+  console.log(`[WebResearch] Discussion search: ${discussionResult.content.length} chars, ${discussionResult.citations.length} citations`);
+  console.log(`[WebResearch] Application search: ${applicationResult.content.length} chars, ${applicationResult.citations.length} citations`);
+  
+  // Check if search actually found useful content (not just empty or very short responses)
+  const hasAuthorInfo = authorResult.content.length > 50;
+  const hasDiscussions = discussionResult.content.length > 50;
+  const hasApplications = applicationResult.content.length > 50;
   
   // Collect all citations
   const allCitations = [
@@ -305,10 +418,19 @@ Provide specific links to code repos, demos, and implementations.`
   
   console.log(`[WebResearch] Found ${uniqueCitations.length} unique sources`);
   
+  // Provide more helpful fallback messages
+  const authorFallback = hasAuthors 
+    ? `Could not find detailed information about ${authorSearchStr}. They may be newer researchers or their work may not be well-documented online yet.`
+    : 'Author names were not available for this paper.';
+    
+  const discussionFallback = `No major discussions or reviews found for "${paperTitle}". This may be a newer paper or a niche topic.`;
+  
+  const applicationFallback = `No implementations or code repositories found for "${paperTitle}" yet. The paper may be too recent or theoretical.`;
+  
   return {
-    authorInfo: authorResult.content || 'No additional author information found.',
-    relatedDiscussions: discussionResult.content || 'No related discussions found.',
-    practicalApplications: applicationResult.content || 'No practical applications found.',
+    authorInfo: hasAuthorInfo ? authorResult.content : authorFallback,
+    relatedDiscussions: hasDiscussions ? discussionResult.content : discussionFallback,
+    practicalApplications: hasApplications ? applicationResult.content : applicationFallback,
     citations: uniqueCitations.slice(0, 15), // Allow more citations
   };
 }
@@ -349,7 +471,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
   return Promise.race([
     promise,
     new Promise<T>((resolve) => setTimeout(() => {
-      console.warn(`[Rewriter] Request timed out after ${ms}ms, using fallback`);
+      console.warn(`[Rewriter] Request timed out after ${ms/1000}s, using fallback`);
       resolve(fallback);
     }, ms))
   ]);
@@ -360,12 +482,15 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
  * Processes each top-level section group independently for speed
  * Model: gpt-5-mini (smarter than 4.1, 4x cheaper, good at creative writing)
  * Uses parallel requests with timeout protection
+ * 
+ * Now uses StyleBlueprint for consistent creative direction across batches!
  */
 export async function callYOLORewriterAgent(
   client: OpenAI,
   structured: StructuredPaper,
-  skeleton: SemanticSkeleton,
-  _researchNotes: ResearchNote[], // Kept for API compatibility but not used for speed
+  _skeleton: SemanticSkeleton, // Kept for API compatibility, blueprint contains the relevant info
+  researchNotes: ResearchNote[],
+  blueprint: StyleBlueprint | null,
   onBatchComplete?: (completed: number, total: number, sectionTitles: string[], allCompletedSections?: RewrittenSection[]) => void
 ): Promise<RewrittenSection[]> {
   // Group sections by top-level parent
@@ -374,6 +499,36 @@ export async function callYOLORewriterAgent(
   // Each group is its own batch (1 top-level section + its subsections)
   const totalBatches = sectionGroups.length;
   console.log(`[Rewriter] Processing ${structured.sections.length} sections in ${totalBatches} parallel batches`);
+  if (blueprint) {
+    console.log(`[Rewriter] Using style blueprint with ${blueprint.sectionPlans?.length || 0} section plans`);
+  }
+  
+  // Prepare condensed research context (shared across all batches)
+  const researchContext = researchNotes.length > 0 
+    ? researchNotes.slice(0, 5).map(n => ({
+        question: n.questionId,
+        answer: n.answer.slice(0, 300),
+        hasSource: n.sources.length > 0,
+      }))
+    : [];
+  
+  // Prepare blueprint context (shared across all batches)
+  const blueprintContext = blueprint ? {
+    narrativeArc: blueprint.narrativeArc,
+    overallTone: blueprint.overallTone,
+    runningJokes: blueprint.runningJokes?.slice(0, 3) || [],
+    honestAdmissions: blueprint.honestAdmissions?.slice(0, 3) || [],
+    strengthsToHighlight: blueprint.strengthsToHighlight?.slice(0, 3) || [],
+    weaknessesToAcknowledge: blueprint.weaknessesToAcknowledge?.slice(0, 3) || [],
+  } : null;
+  
+  // Create a map of section plans for quick lookup
+  const sectionPlanMap = new Map<string, SectionStylePlan>();
+  if (blueprint?.sectionPlans) {
+    for (const plan of blueprint.sectionPlans) {
+      sectionPlanMap.set(plan.sectionId, plan);
+    }
+  }
   
   // Track completed batches for progress reporting
   let completedCount = 0;
@@ -390,31 +545,77 @@ export async function callYOLORewriterAgent(
       html: `<section><h${s.level + 1}>${s.title}</h${s.level + 1}><p>${s.textBlocks.slice(0, 2).join('</p><p>')}</p></section>`,
     }));
     
-    // Aggressively limit content to keep payloads small
+    // Get section-specific plans from blueprint
+    const sectionPlans = sectionBatch.map(s => {
+      const plan = sectionPlanMap.get(s.id);
+      return plan ? {
+        sectionId: s.id,
+        yoloTitle: plan.yoloTitle,
+        openingHook: plan.openingHook,
+        toneNotes: plan.toneNotes,
+        keyPoints: plan.keyPoints?.slice(0, 3) || [],
+        humorOpportunity: plan.humorOpportunity,
+        honestMoment: plan.honestMoment,
+      } : null;
+    }).filter(Boolean);
+    
+    // Build comprehensive input with blueprint guidance
     const input = {
       paperContext: {
         title: structured.title,
-        abstract: structured.abstract.slice(0, 500),
+        abstract: structured.abstract.slice(0, 600),
       },
-      skeleton: {
-        problemStatement: skeleton.problemStatement.slice(0, 300),
-      },
+      // Blueprint guidance for consistent style
+      styleGuidance: blueprintContext ? {
+        ...blueprintContext,
+        sectionPlans, // Only plans for THIS batch
+      } : null,
+      // Research insights - can be woven into the rewrite
+      researchInsights: researchContext,
+      // The sections to actually rewrite (reduced payload for speed)
       sectionsToRewrite: sectionBatch.map(s => ({
         id: s.id,
         title: s.title,
         level: s.level,
-        textBlocks: s.textBlocks.slice(0, 2).map(t => t.slice(0, 500)), // Max 500 chars per block
-        equations: s.equations.slice(0, 1),
+        textBlocks: s.textBlocks.slice(0, 3).map(t => t.slice(0, 600)), // Reduced from 4x800 to 3x600
+        equations: s.equations.slice(0, 1), // Just 1 equation for context
       })),
     };
     
+    // Build the user prompt based on whether we have a blueprint
+    const userPrompt = blueprint 
+      ? `⚠️ FOLLOW THE STYLE BLUEPRINT PROVIDED!
+
+You have been given a style blueprint created specifically for this paper. USE IT:
+- Use the provided "yoloTitle" for section titles
+- Start with the provided "openingHook" 
+- Follow the "toneNotes" for each section
+- Hit the "keyPoints" but make them casual
+- Use the "humorOpportunity" and "honestMoment" if provided
+- Weave in the "runningJokes" where natural
+- Acknowledge "weaknessesToAcknowledge" with humor
+
+The blueprint ensures consistency across the paper. Trust it!
+
+Input:\n\n${JSON.stringify(input, null, 2)}`
+      : `⚠️ IMPORTANT: DO NOT write boring academic prose! Write like a tired grad student who is brilliant but casual.
+
+Rewrite these sections in YOLO style. Remember:
+- Start with casual hooks like "Okay so here's the thing..." or "Look, we get it..."
+- Use contractions (don't, we're, it's)
+- Include at least one honest admission per section
+- Include at least one self-deprecating joke
+- Transform boring titles into fun ones
+
+Input:\n\n${JSON.stringify(input, null, 2)}`;
+
     const doRequest = async (): Promise<RewrittenSection[]> => {
       const response = await chatCompletion(client, {
         model: 'gpt-5-mini',
         systemPrompt: YOLO_REWRITER_AGENT_PROMPT,
-        userContent: `Rewrite these sections in YOLO style:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 4000, // Reduced for faster response
-        temperature: 0.7,
+        userContent: userPrompt,
+        maxTokens: 8000,
+        temperature: 0.85, // Higher temperature for more creative/casual output
         responseFormat: 'json',
       });
       
@@ -423,8 +624,8 @@ export async function callYOLORewriterAgent(
     };
     
     try {
-      // 60 second timeout per batch
-      const result = await withTimeout(doRequest(), 60000, placeholders);
+      // 180 second timeout per batch (large sections need more time)
+      const result = await withTimeout(doRequest(), 180000, placeholders);
       
       // Add to all completed sections for streaming preview
       allCompletedSections.push(...result);
@@ -509,7 +710,7 @@ export async function callFigureMappingAgent(
         model: 'gpt-5-nano',
         systemPrompt: FIGURE_MAPPING_AGENT_PROMPT,
         userContent: `Map these figures to sections:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 2000,
+        maxTokens: 8000,
         responseFormat: 'json',
       });
       
@@ -563,7 +764,7 @@ export async function callCritiqueAgent(
         model: 'gpt-5.1',  // Best reasoning model for critical review
         systemPrompt: CRITIQUE_AGENT_PROMPT,
         userContent: `Review this rewritten paper:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 8000,  // More tokens for reasoning
+        maxTokens: 16000,  // More tokens for reasoning
         responseFormat: 'json',
       });
       
@@ -584,63 +785,92 @@ export async function callCritiqueAgent(
 
 /**
  * Patch Agent - Makes targeted fixes
- * Model: gpt-5-nano (structured edits, cheapest)
- * Includes retry logic
+ * Model: gpt-5-mini (upgraded from nano - needs more capacity for HTML output)
+ * Processes sections in small batches (2-3 at a time) to balance speed vs token limits
  */
 export async function callPatchAgent(
   client: OpenAI,
   sectionsToFix: RewrittenSection[],
   issues: CritiqueIssue[],
   structured: StructuredPaper,
-  researchNotes: ResearchNote[]
+  _researchNotes: ResearchNote[] // Kept for API compatibility
 ): Promise<RewrittenSection[]> {
-  // Get relevant original sections
-  const relevantOriginal = structured.sections
-    .filter(s => sectionsToFix.some(sf => sf.id === s.id))
-    .map(s => ({
-      id: s.id,
-      title: s.title,
-      textBlocks: s.textBlocks.slice(0, 3), // Reduced limit
-    }));
-  
-  const input = {
-    sectionsToFix: sectionsToFix.map(s => ({
-      id: s.id,
-      title: s.title,
-      html: s.html.slice(0, 2000), // Limit HTML size
-    })),
-    issues,
-    originalContent: relevantOriginal,
-    researchNotes: researchNotes.slice(0, 2),
-  };
-  
-  const maxRetries = 2;
-  
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-      }
-      
-      const response = await chatCompletion(client, {
-        model: 'gpt-5-nano',
-        systemPrompt: PATCH_AGENT_PROMPT,
-        userContent: `Fix these issues in the sections:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 8000,
-        responseFormat: 'json',
-      });
-      
-      const parsed = parseJSONResponse<PatchAgentResponse>(response);
-      return parsed.sections;
-    } catch (e) {
-      console.warn(`Patch attempt ${attempt + 1} failed:`, e);
-      if (attempt === maxRetries) {
-        // Return original sections unchanged
-        console.error('Patch agent failed, keeping original sections');
-        return sectionsToFix;
-      }
-    }
+  // Group sections into small batches (2 sections per batch to avoid token limits)
+  const BATCH_SIZE = 2;
+  const batches: RewrittenSection[][] = [];
+  for (let i = 0; i < sectionsToFix.length; i += BATCH_SIZE) {
+    batches.push(sectionsToFix.slice(i, i + BATCH_SIZE));
   }
   
-  return sectionsToFix;
+  console.log(`[Patch] Processing ${sectionsToFix.length} sections in ${batches.length} batches`);
+  
+  // Process batches in parallel
+  const batchResults = await Promise.all(batches.map(async (batch, batchIndex) => {
+    // Get issues for sections in this batch
+    const batchSectionIds = new Set(batch.map(s => s.id));
+    const batchIssues = issues.filter(i => batchSectionIds.has(i.location.sectionId));
+    
+    if (batchIssues.length === 0) {
+      // No issues for this batch, return as-is
+      return batch;
+    }
+    
+    // Get relevant original sections
+    const originalSections = structured.sections
+      .filter(s => batchSectionIds.has(s.id))
+      .map(s => ({
+        id: s.id,
+        title: s.title,
+        textBlocks: s.textBlocks.slice(0, 2).map(t => t.slice(0, 300)),
+      }));
+    
+    const input = {
+      sectionsToFix: batch.map(s => ({
+        id: s.id,
+        title: s.title,
+        html: s.html.slice(0, 2500), // Limit per section
+      })),
+      issues: batchIssues.map(i => ({
+        sectionId: i.location.sectionId,
+        severity: i.severity,
+        kind: i.kind,
+        message: i.message,
+        suggestion: i.suggestion,
+      })),
+      originalContent: originalSections,
+    };
+    
+    const maxRetries = 2;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+        
+        const response = await chatCompletion(client, {
+          model: 'gpt-5-mini',
+          systemPrompt: PATCH_AGENT_PROMPT,
+          userContent: `Fix these issues in the sections:\n\n${JSON.stringify(input, null, 2)}`,
+          maxTokens: 8000,
+          responseFormat: 'json',
+        });
+        
+        const parsed = parseJSONResponse<PatchAgentResponse>(response);
+        if (parsed.sections && parsed.sections.length > 0) {
+          console.log(`[Patch] Batch ${batchIndex + 1}/${batches.length} complete: ${parsed.sections.length} sections`);
+          return parsed.sections;
+        }
+      } catch (e) {
+        console.warn(`[Patch] Batch ${batchIndex + 1} attempt ${attempt + 1} failed:`, e);
+      }
+    }
+    
+    // Return original sections if patching failed
+    console.warn(`[Patch] Batch ${batchIndex + 1} failed, keeping original sections`);
+    return batch;
+  }));
+  
+  // Flatten batch results
+  return batchResults.flat();
 }

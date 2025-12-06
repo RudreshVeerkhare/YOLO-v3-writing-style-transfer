@@ -5,6 +5,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { FinalDocument } from '../types';
 import { convertToMarkdown } from '../services/assembler';
+import { PublishModal } from './PublishModal';
+import { isGalleryAvailable } from '../services/galleryService';
 
 interface DocumentViewerProps {
   document: FinalDocument | null;
@@ -14,6 +16,7 @@ interface DocumentViewerProps {
 export const DocumentViewer: React.FC<DocumentViewerProps> = ({ document, isPartial = false }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'html' | 'markdown'>('preview');
+  const [showPublishModal, setShowPublishModal] = useState(false);
   
   useEffect(() => {
     if (document && iframeRef.current && viewMode === 'preview') {
@@ -191,6 +194,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ document, isPart
               <button onClick={handleOpenInNewTab} className="download-btn">
                 🔗 Open
               </button>
+              <button 
+                onClick={() => setShowPublishModal(true)} 
+                className="download-btn publish-btn"
+                title={isGalleryAvailable() ? 'Publish to public gallery' : 'Gallery not configured'}
+              >
+                📤 Publish
+              </button>
             </div>
           )}
         </div>
@@ -218,6 +228,13 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ document, isPart
           </div>
         )}
       </div>
+      
+      {/* Publish Modal */}
+      <PublishModal
+        document={document}
+        isOpen={showPublishModal}
+        onClose={() => setShowPublishModal(false)}
+      />
     </div>
   );
 };

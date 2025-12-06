@@ -255,7 +255,7 @@ export function getModelDisplayName(model: string): string {
   
   // Map to friendly names with task context
   const displayNames: Record<string, string> = {
-    'gpt-5.1': 'GPT-5.1 (Critique)',
+    'gpt-5.1': 'GPT-5.1 (Semantic & Critique)',
     'gpt-5': 'GPT-5 (Web Search)',
     'gpt-5-mini': 'GPT-5 Mini (Rewrite)',
     'gpt-5-nano': 'GPT-5 Nano (Tasks)',

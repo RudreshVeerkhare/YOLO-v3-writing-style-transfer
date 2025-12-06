@@ -79,6 +79,38 @@ export type SemanticSkeleton = {
 };
 
 /**
+ * Style Blueprint - Creative plan for YOLO-style rewrite
+ * Generated BEFORE rewriting to ensure consistency across batches
+ */
+export type StyleBlueprint = {
+  // Overall narrative strategy
+  narrativeArc: string;  // e.g., "Start skeptical, build excitement, end honest"
+  overallTone: string;   // e.g., "Tired but brilliant grad student at 2am"
+  
+  // Section-by-section plan
+  sectionPlans: SectionStylePlan[];
+  
+  // Key phrases/jokes to use throughout
+  runningJokes: string[];      // e.g., ["We tried X, it was a disaster"]
+  honestAdmissions: string[];  // e.g., ["We don't know why this works"]
+  
+  // Things to emphasize/downplay
+  strengthsToHighlight: string[];
+  weaknessesToAcknowledge: string[];
+};
+
+export type SectionStylePlan = {
+  sectionId: string;
+  originalTitle: string;
+  yoloTitle: string;           // e.g., "Introduction" -> "What's the Deal?"
+  openingHook: string;         // First sentence/hook to use
+  toneNotes: string;           // Specific tone guidance for this section
+  keyPoints: string[];         // Main points to preserve/emphasize
+  humorOpportunity?: string;   // Where to inject humor in this section
+  honestMoment?: string;       // What to be honest about here
+};
+
+/**
  * A research question identified in the paper
  */
 export type ResearchQuestion = {
@@ -143,6 +175,19 @@ export type CritiqueIssue = {
 };
 
 /**
+ * Generation configuration used to create the document
+ */
+export type GenerationConfig = {
+  model: string;
+  critiqueIterations: number;
+  webSearchEnabled: boolean;
+  estimatedCost: number;
+  actualCost?: number;
+  totalTokens: number;
+  generationTimeMs: number;
+};
+
+/**
  * The final assembled document
  */
 export type FinalDocument = {
@@ -152,6 +197,8 @@ export type FinalDocument = {
     authors: string[];
     arxivId: string;
     generationDate: string;
+    originalAbstract: string;
+    generationConfig: GenerationConfig;
   };
 };
 
@@ -161,10 +208,12 @@ export type FinalDocument = {
 
 export type PipelineStage =
   | "idle"
+  | "fetch"
   | "ingestion"
   | "structure"
   | "semantics"
   | "research"
+  | "websearch"
   | "rewrite"
   | "figures"
   | "critique"
@@ -192,6 +241,8 @@ export type PipelineStatus = {
 // ============================================================
 
 export type SemanticMapAgentResponse = SemanticSkeleton;
+
+export type StyleBlueprintAgentResponse = StyleBlueprint;
 
 export type ResearchQuestionsAgentResponse = {
   questions: ResearchQuestion[];

@@ -59,6 +59,24 @@ body {
   font-size: 1em;
 }
 
+.app-header .gallery-link {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 20px;
+  color: white;
+  text-decoration: none;
+  font-size: 0.9em;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.app-header .gallery-link:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
 .app-main {
   flex: 1;
   padding: 20px;
@@ -526,6 +544,14 @@ body {
   opacity: 0.5;
 }
 
+.stage-section.stage-skipped {
+  opacity: 0.6;
+}
+
+.stage-section.stage-skipped .stage-header {
+  background: #f0f0f0;
+}
+
 .stage-section.stage-active {
   box-shadow: 0 0 0 2px var(--warning-color);
 }
@@ -581,6 +607,27 @@ body {
 .stage-label {
   flex: 1;
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stage-optional-badge {
+  font-size: 0.65em;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.stage-skipped-label {
+  font-size: 0.75em;
+  font-weight: 400;
+  color: #888;
+  font-style: italic;
 }
 
 .stage-log-count {

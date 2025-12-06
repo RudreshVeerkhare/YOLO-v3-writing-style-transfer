@@ -10,6 +10,7 @@ import { parseLatexToStructuredPaper, getParseStats, setCustomMacros } from './t
 import { estimatePipelineCost, type CostEstimate } from './costEstimator';
 import {
   callSemanticMapAgent,
+  callStyleBlueprintAgent,
   callResearchQuestionsAgent,
   callResearchAnswerAgent,
   callWebResearchAgent,
@@ -23,6 +24,7 @@ import type {
   PaperTeXBundle,
   StructuredPaper,
   SemanticSkeleton,
+  StyleBlueprint,
   ResearchQuestion,
   ResearchNote,
   RewrittenSection,
@@ -31,7 +33,9 @@ import type {
   PipelineStage,
   LogEntry,
   ExternalResearch,
+  GenerationConfig,
 } from '../types';
+import { globalUsageTracker } from './usageTracker';
 
 export interface PipelineCallbacks {
   onStageChange: (stage: PipelineStage) => void;
@@ -76,30 +80,40 @@ export async function runPipeline(
   let rewritten: RewrittenSection[];
   let figurePlacements: FigurePlacement[];
   
+  // Track generation timing
+  const startTime = Date.now();
+  
   try {
     // Create OpenAI client
     client = createOpenAIClient({ apiKey });
     
     // ========================================
-    // Stage 1: Ingestion
+    // Stage 1: Fetch Paper from arXiv
     // ========================================
-    onStageChange('ingestion');
-    onProgress(5);
-    log('ingestion', `Fetching TeX source for arXiv:${arxivId}...`);
+    onStageChange('fetch');
+    onProgress(1);
+    log('fetch', `Starting download for arXiv:${arxivId}...`);
     
     try {
-      bundle = await fetchAndExtractTeX(arxivId);
-      log('ingestion', `Found ${Object.keys(bundle.texFiles).length} TeX files and ${Object.keys(bundle.assets).length} assets`);
-      log('ingestion', `Main file: ${bundle.mainTexFilename}`);
-      log('ingestion', `Title: ${bundle.metadata.title}`);
+      bundle = await fetchAndExtractTeX(arxivId, (msg) => log('fetch', msg));
     } catch (e) {
       throw new Error(`Failed to fetch arXiv source: ${e}`);
     }
     
+    onProgress(5);
+    
+    // ========================================
+    // Stage 2: Ingestion - Process the downloaded content
+    // ========================================
+    onStageChange('ingestion');
+    log('ingestion', `Processing ${Object.keys(bundle.texFiles).length} TeX files and ${Object.keys(bundle.assets).length} assets`);
+    log('ingestion', `Main file: ${bundle.mainTexFilename}`);
+    log('ingestion', `Title: ${bundle.metadata.title}`);
+    
     onProgress(10);
     
     // ========================================
-    // Stage 2: Structure (Deterministic Parser - no LLM)
+    // Stage 3: Structure (Deterministic Parser - no LLM)
     // ========================================
     onStageChange('structure');
     log('structure', 'Parsing LaTeX with deterministic parser...');
@@ -123,7 +137,7 @@ export async function runPipeline(
     onProgress(20);
     
     // ========================================
-    // Stage 3: Semantics
+    // Stage 4: Semantics
     // ========================================
     onStageChange('semantics');
     log('semantics', 'Building semantic skeleton...');
@@ -136,45 +150,34 @@ export async function runPipeline(
     onProgress(30);
     
     // ========================================
-    // Stage 4: Research
+    // Stage 5: Research & Answer
     // ========================================
     onStageChange('research');
-    log('research', 'Identifying research gaps...');
     
+    // 5a: Generate research questions
+    log('research', 'Identifying research gaps...');
     questions = await callResearchQuestionsAgent(client, structured, skeleton);
     log('research', `Generated ${questions.length} research questions`);
-    for (const q of questions.slice(0, 3)) {
-      log('research', `  • ${q.question.slice(0, 60)}...`);
+    for (const q of questions.slice(0, 2)) {
+      log('research', `  • ${q.question.slice(0, 50)}...`);
     }
+    onProgress(32);
     
-    onProgress(35);
-    
-    log('research', `Researching ${questions.length} questions in parallel...`);
-    
-    // Start web research in parallel with question answering (if enabled)
-    let webResearchPromise: Promise<ExternalResearch | null>;
-    if (options.enableWebSearch) {
-      log('research', 'Web search enabled — researching authors and discussions...');
-      webResearchPromise = callWebResearchAgent(
-        client,
-        structured.title,
-        structured.authors,
-        structured.abstract
-      ).catch(e => {
-        log('research', `Web research failed (non-critical): ${e}`);
-        return null;
-      });
-    } else {
-      log('research', 'Web search disabled — skipping external research');
-      webResearchPromise = Promise.resolve(null);
-    }
-    
-    // Process all research questions in parallel
+    // 5b: Answer research questions with progress tracking
+    log('research', `Answering ${questions.length} questions...`);
+    let answeredCount = 0;
     const researchPromises = questions.map(async (question) => {
       try {
-        return await callResearchAnswerAgent(client, question, structured.title);
+        const result = await callResearchAnswerAgent(client, question, structured.title);
+        answeredCount++;
+        // Update progress: 32% to 38% during answers
+        const answerProgress = 32 + Math.floor((answeredCount / questions.length) * 6);
+        onProgress(answerProgress);
+        log('research', `  ✓ Answered: ${question.question.slice(0, 40)}...`);
+        return result;
       } catch (e) {
-        log('research', `Failed to answer question ${question.id}: ${e}`);
+        answeredCount++;
+        log('research', `  ✗ Failed: ${question.id}`);
         return {
           questionId: question.id,
           answer: 'Could not research this question due to an error.',
@@ -183,40 +186,80 @@ export async function runPipeline(
       }
     });
     
-    // Wait for both to complete
-    const [researchResults, webResearchResult] = await Promise.all([
-      Promise.all(researchPromises),
-      webResearchPromise,
-    ]);
-    
-    researchNotes = researchResults;
-    externalResearch = webResearchResult;
-    
-    log('research', `Collected ${researchNotes.length} research notes`);
-    if (externalResearch) {
-      log('research', `Web research: Found ${externalResearch.citations.length} external sources`);
-    }
-    onProgress(45);
+    // Wait for research answers
+    researchNotes = await Promise.all(researchPromises);
+    log('research', `Completed ${researchNotes.length} research answers`);
+    onProgress(38);
     
     // ========================================
-    // Stage 5: Rewrite
+    // Stage 6: Web Search (optional)
+    // ========================================
+    onStageChange('websearch');
+    
+    if (options.enableWebSearch) {
+      log('websearch', 'Searching for author info & community discussions...');
+      try {
+        externalResearch = await callWebResearchAgent(
+          client,
+          structured.title,
+          structured.authors,
+          structured.abstract
+        );
+        if (externalResearch) {
+          log('websearch', `Found ${externalResearch.citations.length} sources`);
+          if (externalResearch.authorInfo) {
+            log('websearch', `Author info: ${externalResearch.authorInfo.slice(0, 60)}...`);
+          }
+        }
+      } catch (e) {
+        log('websearch', `Web search failed (non-critical): ${e}`);
+        externalResearch = null;
+      }
+    }
+    // If web search is disabled, stage will show as "skipped" (no logs)
+    onProgress(42);
+    
+    // ========================================
+    // Stage 7: Rewrite (includes style planning)
     // ========================================
     onStageChange('rewrite');
+    log('rewrite', 'Planning creative style direction...');
+    
+    let styleBlueprint: StyleBlueprint | null = null;
+    try {
+      styleBlueprint = await callStyleBlueprintAgent(
+        client,
+        structured,
+        skeleton,
+        researchNotes
+      );
+      log('rewrite', `Style blueprint created: "${styleBlueprint.narrativeArc?.slice(0, 60)}..."`);
+      log('rewrite', `Planned ${styleBlueprint.sectionPlans?.length || 0} section rewrites`);
+    } catch (e) {
+      log('rewrite', `Style planning failed (non-critical, will use default style): ${e}`);
+      styleBlueprint = null;
+    }
+    onProgress(48);
+    
     log('rewrite', 'Generating YOLO-style rewrite...');
     
     // Count top-level sections for accurate batch estimate
     const topLevelSections = structured.sections.filter(s => s.level === 1).length;
     log('rewrite', `Processing ${structured.sections.length} sections (${topLevelSections} top-level) in parallel...`);
+    if (styleBlueprint) {
+      log('rewrite', `Using style blueprint for consistent creative direction`);
+    }
     
     rewritten = await callYOLORewriterAgent(
       client,
       structured,
       skeleton,
       researchNotes,
+      styleBlueprint,
       (completed, total, titles, partialSections) => {
         log('rewrite', `Batch ${completed}/${total} complete: ${titles.slice(0, 2).join(', ')}${titles.length > 2 ? '...' : ''}`);
-        // Update progress: rewrite stage goes from 45% to 60%
-        const rewriteProgress = 45 + Math.floor((completed / total) * 15);
+        // Update progress: rewrite stage goes from 48% to 62%
+        const rewriteProgress = 48 + Math.floor((completed / total) * 14);
         onProgress(rewriteProgress);
         
         // Stream partial document to preview
@@ -236,7 +279,7 @@ export async function runPipeline(
     onProgress(60);
     
     // ========================================
-    // Stage 6: Figures
+    // Stage 7: Figures
     // ========================================
     onStageChange('figures');
     log('figures', 'Mapping figures to sections...');
@@ -252,7 +295,7 @@ export async function runPipeline(
     onProgress(65);
     
     // ========================================
-    // Stage 7: Critique Loop
+    // Stage 8: Critique Loop
     // ========================================
     onStageChange('critique');
     const maxIterations = options.critiqueIterations;
@@ -316,10 +359,22 @@ export async function runPipeline(
     onProgress(85);
     
     // ========================================
-    // Stage 8: Assembly
+    // Stage 9: Assembly
     // ========================================
     onStageChange('assembly');
     log('assembly', 'Assembling final document...');
+    
+    // Build generation config from tracked usage
+    const usageStats = globalUsageTracker.getStats();
+    const generationConfig: GenerationConfig = {
+      model: 'gpt-5.1',
+      critiqueIterations: options.critiqueIterations,
+      webSearchEnabled: options.enableWebSearch,
+      estimatedCost: usageStats.estimatedCost,
+      actualCost: usageStats.estimatedCost,
+      totalTokens: usageStats.totalInputTokens + usageStats.totalOutputTokens,
+      generationTimeMs: Date.now() - startTime,
+    };
     
     const finalDocument = assembleFinalDocument(
       bundle,
@@ -327,7 +382,8 @@ export async function runPipeline(
       rewritten,
       figurePlacements,
       researchNotes,
-      externalResearch
+      externalResearch,
+      generationConfig
     );
     
     log('assembly', 'Document assembly complete!');
@@ -378,20 +434,43 @@ export function normalizeArxivId(input: string): string {
 // Re-export CostEstimate type for use in components
 export type { CostEstimate } from './costEstimator';
 
+export interface EstimateProgressCallbacks {
+  onStageChange: (stage: 'fetch' | 'ingestion' | 'structure') => void;
+  onLog: (stage: 'fetch' | 'ingestion' | 'structure', message: string) => void;
+  onProgress: (progress: number) => void;
+  onEstimateComplete: () => void;
+}
+
 /**
  * Prefetch paper and estimate cost WITHOUT making any LLM API calls
  * Returns the cost estimate and parsed paper data for confirmation
  */
 export async function prefetchAndEstimateCost(
   arxivId: string,
-  options: PipelineOptions
+  options: PipelineOptions,
+  callbacks?: EstimateProgressCallbacks
 ): Promise<{
   estimate: CostEstimate;
   bundle: PaperTeXBundle;
   structured: StructuredPaper;
 }> {
-  // Fetch TeX source
-  const bundle = await fetchAndExtractTeX(arxivId);
+  const log = (stage: 'fetch' | 'ingestion' | 'structure', message: string) => {
+    callbacks?.onLog(stage, message);
+  };
+  
+  // Stage 1: Fetch
+  callbacks?.onStageChange('fetch');
+  callbacks?.onProgress(1);
+  log('fetch', `Starting download for arXiv:${arxivId}...`);
+  
+  const bundle = await fetchAndExtractTeX(arxivId, (msg) => log('fetch', msg));
+  callbacks?.onProgress(5);
+  
+  // Stage 2: Ingestion
+  callbacks?.onStageChange('ingestion');
+  log('ingestion', `Processing ${Object.keys(bundle.texFiles).length} TeX files and ${Object.keys(bundle.assets).length} assets`);
+  log('ingestion', `Main file: ${bundle.mainTexFilename}`);
+  log('ingestion', `Title: ${bundle.metadata.title}`);
   
   // Resolve includes
   const mainTex = bundle.texFiles[bundle.mainTexFilename];
@@ -399,9 +478,21 @@ export async function prefetchAndEstimateCost(
   
   // Load custom macros before parsing
   setCustomMacros(bundle.customMacros);
+  if (bundle.customMacros && bundle.customMacros.length > 0) {
+    log('ingestion', `Found ${bundle.customMacros.length} custom macros in preamble`);
+  }
+  callbacks?.onProgress(10);
   
-  // Parse structure (deterministic, no LLM)
+  // Stage 3: Structure
+  callbacks?.onStageChange('structure');
+  log('structure', 'Parsing LaTeX with deterministic parser...');
+  
   const structured = parseLatexToStructuredPaper(resolvedTex, bundle.metadata);
+  
+  const parseStats = getParseStats(structured);
+  log('structure', `Parsed ${parseStats.sectionCount} sections, ${parseStats.figureCount} figures, ${parseStats.equationCount} equations`);
+  log('structure', `Extracted ${parseStats.textBlockCount} text blocks (${Math.round(parseStats.totalTextLength / 1000)}k chars)`);
+  callbacks?.onProgress(20);
   
   // Estimate cost
   const estimate = estimatePipelineCost(structured, options);
@@ -437,6 +528,9 @@ export async function runPipelineWithPrefetchedData(
   let rewritten: RewrittenSection[];
   let figurePlacements: FigurePlacement[];
   
+  // Track generation timing
+  const startTime = Date.now();
+  
   try {
     // Create OpenAI client
     client = createOpenAIClient({ apiKey });
@@ -468,45 +562,34 @@ export async function runPipelineWithPrefetchedData(
     onProgress(30);
     
     // ========================================
-    // Stage 4: Research
+    // Stage 4: Research & Answer
     // ========================================
     onStageChange('research');
-    log('research', 'Identifying research gaps...');
     
+    // 4a: Generate research questions
+    log('research', 'Identifying research gaps...');
     questions = await callResearchQuestionsAgent(client, structured, skeleton);
     log('research', `Generated ${questions.length} research questions`);
-    for (const q of questions.slice(0, 3)) {
-      log('research', `  • ${q.question.slice(0, 60)}...`);
+    for (const q of questions.slice(0, 2)) {
+      log('research', `  • ${q.question.slice(0, 50)}...`);
     }
+    onProgress(32);
     
-    onProgress(35);
-    
-    log('research', `Researching ${questions.length} questions in parallel...`);
-    
-    // Start web research in parallel with question answering (if enabled)
-    let webResearchPromise: Promise<ExternalResearch | null>;
-    if (options.enableWebSearch) {
-      log('research', 'Web search enabled — researching authors and discussions...');
-      webResearchPromise = callWebResearchAgent(
-        client,
-        structured.title,
-        structured.authors,
-        structured.abstract
-      ).catch(e => {
-        log('research', `Web research failed (non-critical): ${e}`);
-        return null;
-      });
-    } else {
-      log('research', 'Web search disabled — skipping external research');
-      webResearchPromise = Promise.resolve(null);
-    }
-    
-    // Process all research questions in parallel
+    // 4b: Answer research questions with progress tracking
+    log('research', `Answering ${questions.length} questions...`);
+    let answeredCount = 0;
     const researchPromises = questions.map(async (question) => {
       try {
-        return await callResearchAnswerAgent(client, question, structured.title);
+        const result = await callResearchAnswerAgent(client, question, structured.title);
+        answeredCount++;
+        // Update progress: 32% to 38% during answers
+        const answerProgress = 32 + Math.floor((answeredCount / questions.length) * 6);
+        onProgress(answerProgress);
+        log('research', `  ✓ Answered: ${question.question.slice(0, 40)}...`);
+        return result;
       } catch (e) {
-        log('research', `Failed to answer question ${question.id}: ${e}`);
+        answeredCount++;
+        log('research', `  ✗ Failed: ${question.id}`);
         return {
           questionId: question.id,
           answer: 'Could not research this question due to an error.',
@@ -515,38 +598,78 @@ export async function runPipelineWithPrefetchedData(
       }
     });
     
-    // Wait for both to complete
-    const [researchResults, webResearchResult] = await Promise.all([
-      Promise.all(researchPromises),
-      webResearchPromise,
-    ]);
-    
-    researchNotes = researchResults;
-    externalResearch = webResearchResult;
-    
-    log('research', `Collected ${researchNotes.length} research notes`);
-    if (externalResearch) {
-      log('research', `Web research: Found ${externalResearch.citations.length} external sources`);
-    }
-    onProgress(45);
+    // Wait for research answers
+    researchNotes = await Promise.all(researchPromises);
+    log('research', `Completed ${researchNotes.length} research answers`);
+    onProgress(38);
     
     // ========================================
-    // Stage 5: Rewrite
+    // Stage 5: Web Search (optional)
+    // ========================================
+    onStageChange('websearch');
+    
+    if (options.enableWebSearch) {
+      log('websearch', 'Searching for author info & community discussions...');
+      try {
+        externalResearch = await callWebResearchAgent(
+          client,
+          structured.title,
+          structured.authors,
+          structured.abstract
+        );
+        if (externalResearch) {
+          log('websearch', `Found ${externalResearch.citations.length} sources`);
+          if (externalResearch.authorInfo) {
+            log('websearch', `Author info: ${externalResearch.authorInfo.slice(0, 60)}...`);
+          }
+        }
+      } catch (e) {
+        log('websearch', `Web search failed (non-critical): ${e}`);
+        externalResearch = null;
+      }
+    }
+    // If web search is disabled, stage will show as "skipped" (no logs)
+    onProgress(42);
+    
+    // ========================================
+    // Stage 6: Rewrite (includes style planning)
     // ========================================
     onStageChange('rewrite');
+    log('rewrite', 'Planning creative style direction...');
+    
+    let styleBlueprint: StyleBlueprint | null = null;
+    try {
+      styleBlueprint = await callStyleBlueprintAgent(
+        client,
+        structured,
+        skeleton,
+        researchNotes
+      );
+      log('rewrite', `Style blueprint created: "${styleBlueprint.narrativeArc?.slice(0, 60)}..."`);
+      log('rewrite', `Planned ${styleBlueprint.sectionPlans?.length || 0} section rewrites`);
+    } catch (e) {
+      log('rewrite', `Style planning failed (non-critical, will use default style): ${e}`);
+      styleBlueprint = null;
+    }
+    onProgress(48);
+    
     log('rewrite', 'Generating YOLO-style rewrite...');
     
     const topLevelSections = structured.sections.filter(s => s.level === 1).length;
     log('rewrite', `Processing ${structured.sections.length} sections (${topLevelSections} top-level) in parallel...`);
+    if (styleBlueprint) {
+      log('rewrite', `Using style blueprint for consistent creative direction`);
+    }
     
     rewritten = await callYOLORewriterAgent(
       client,
       structured,
       skeleton,
       researchNotes,
+      styleBlueprint,
       (completed, total, titles, partialSections) => {
         log('rewrite', `Batch ${completed}/${total} complete: ${titles.slice(0, 2).join(', ')}${titles.length > 2 ? '...' : ''}`);
-        const rewriteProgress = 45 + Math.floor((completed / total) * 15);
+        const rewriteProgress = 48 + Math.floor((completed / total) * 14);
         onProgress(rewriteProgress);
         
         if (onPartialDocument && partialSections && partialSections.length > 0) {
@@ -562,7 +685,7 @@ export async function runPipelineWithPrefetchedData(
     );
     
     log('rewrite', `Generated ${rewritten.length} rewritten sections`);
-    onProgress(60);
+    onProgress(62);
     
     // ========================================
     // Stage 6: Figures
@@ -648,13 +771,26 @@ export async function runPipelineWithPrefetchedData(
     onStageChange('assembly');
     log('assembly', 'Assembling final document...');
     
+    // Build generation config from tracked usage
+    const usageStats = globalUsageTracker.getStats();
+    const generationConfig: GenerationConfig = {
+      model: 'gpt-5.1',
+      critiqueIterations: options.critiqueIterations,
+      webSearchEnabled: options.enableWebSearch,
+      estimatedCost: usageStats.estimatedCost,
+      actualCost: usageStats.estimatedCost,
+      totalTokens: usageStats.totalInputTokens + usageStats.totalOutputTokens,
+      generationTimeMs: Date.now() - startTime,
+    };
+    
     const finalDocument = assembleFinalDocument(
       bundle,
       structured,
       rewritten,
       figurePlacements,
       researchNotes,
-      externalResearch
+      externalResearch,
+      generationConfig
     );
     
     log('assembly', 'Document assembly complete!');
