@@ -673,8 +673,12 @@ Input:\n\n${JSON.stringify(input, null, 2)}`;
 
 /**
  * Figure Mapping Agent - Places figures in sections
- * Model: gpt-5-nano (simple matching, cheapest model)
- * Includes retry logic
+ * 
+ * STRATEGY: Use ORIGINAL figure references from the paper's LaTeX!
+ * Each section has a `figures` array containing the figure IDs that were 
+ * \ref'd in that section. This gives us the CORRECT placement.
+ * 
+ * Only use LLM as fallback for figures not referenced anywhere.
  */
 export async function callFigureMappingAgent(
   client: OpenAI,
@@ -686,48 +690,96 @@ export async function callFigureMappingAgent(
     return [];
   }
   
-  const input = {
-    figures: structured.figures.map(f => ({
-      id: f.id,
-      caption: f.caption.slice(0, 200),
-    })),
-    sectionTitles: rewrittenSections.map(s => ({
-      id: s.id,
-      title: s.title,
-    })),
-  };
+  const placements: FigurePlacement[] = [];
+  const placedFigureIds = new Set<string>();
   
-  const maxRetries = 2;
+  // Create a mapping from original section IDs to rewritten section IDs
+  // (they should match, but let's be safe)
+  const rewrittenSectionIds = new Set(rewrittenSections.map(s => s.id));
   
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Add delay if retrying to handle rate limits
-      if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
-      }
+  // STEP 1: Use original figure references from LaTeX
+  // Each structured section has a `figures` array of figure IDs referenced in it
+  for (const section of structured.sections) {
+    if (!section.figures || section.figures.length === 0) continue;
+    
+    // Check if this section exists in the rewritten output
+    const targetSectionId = rewrittenSectionIds.has(section.id) 
+      ? section.id 
+      : rewrittenSections[0]?.id; // fallback to first section
+    
+    if (!targetSectionId) continue;
+    
+    for (const figureId of section.figures) {
+      if (placedFigureIds.has(figureId)) continue; // Already placed (first reference wins)
       
+      // Verify this figure actually exists
+      const figureExists = structured.figures.some(f => f.id === figureId);
+      if (!figureExists) continue;
+      
+      placements.push({
+        figureId,
+        placedInSectionId: targetSectionId,
+        placementHint: 'inline', // Referenced figures should be inline with text
+      });
+      placedFigureIds.add(figureId);
+      
+      console.log(`[FigureMapping] Placed ${figureId} in ${targetSectionId} (from original ref)`);
+    }
+  }
+  
+  // STEP 2: Handle figures that weren't referenced anywhere
+  const unreferencedFigures = structured.figures.filter(f => !placedFigureIds.has(f.id));
+  
+  if (unreferencedFigures.length > 0) {
+    console.log(`[FigureMapping] ${unreferencedFigures.length} figures not referenced, using LLM placement...`);
+    
+    // Use LLM only for unreferenced figures
+    const input = {
+      figures: unreferencedFigures.map(f => ({
+        id: f.id,
+        caption: f.caption.slice(0, 200),
+      })),
+      sections: rewrittenSections.map(s => ({
+        id: s.id,
+        title: s.title,
+      })),
+    };
+    
+    try {
       const response = await chatCompletion(client, {
         model: 'gpt-5-nano',
         systemPrompt: FIGURE_MAPPING_AGENT_PROMPT,
-        userContent: `Map these figures to sections:\n\n${JSON.stringify(input, null, 2)}`,
-        maxTokens: 8000,
+        userContent: `Map these unreferenced figures to the most relevant sections:\n\n${JSON.stringify(input, null, 2)}`,
+        maxTokens: 4000,
         responseFormat: 'json',
       });
       
       const parsed = parseJSONResponse<FigureMappingAgentResponse>(response);
-      return parsed.placements;
+      for (const p of parsed.placements) {
+        if (!placedFigureIds.has(p.figureId)) {
+          placements.push(p);
+          placedFigureIds.add(p.figureId);
+          console.log(`[FigureMapping] Placed ${p.figureId} in ${p.placedInSectionId} (LLM guess)`);
+        }
+      }
     } catch (e) {
-      console.warn(`Figure mapping attempt ${attempt + 1} failed:`, e);
+      console.warn('LLM figure placement failed, using fallback:', e);
+      
+      // Simple fallback: put unreferenced figures in the first section
+      for (const f of unreferencedFigures) {
+        if (!placedFigureIds.has(f.id)) {
+          placements.push({
+            figureId: f.id,
+            placedInSectionId: rewrittenSections[0]?.id || 'sec-intro',
+            placementHint: 'bottom',
+          });
+        }
+      }
     }
   }
   
-  // Fallback: create default placements
-  console.error('Figure mapping failed, using default placements');
-  return structured.figures.map((f, i) => ({
-    figureId: f.id,
-    placedInSectionId: rewrittenSections[Math.min(i, rewrittenSections.length - 1)]?.id || 'sec-intro',
-    placementHint: 'bottom' as const,
-  }));
+  console.log(`[FigureMapping] Total: ${placements.length} figures placed`);
+  return placements;
 }
 
 /**
