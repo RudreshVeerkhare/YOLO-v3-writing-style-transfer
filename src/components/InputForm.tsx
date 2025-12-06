@@ -133,7 +133,7 @@ export const InputForm: React.FC<InputFormProps> = ({ onSubmit, isRunning }) => 
   
   return (
     <div className="input-form-container">
-      <h2>📄 YOLO-Style Paper Rewriter</h2>
+      <h2>📄 YOLOv3-Style Paper Rewriter</h2>
       <p className="subtitle">
         Transform dense academic papers into honest, accessible explanations
       </p>

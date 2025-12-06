@@ -85,7 +85,7 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🎯 YOLO-Style GPT-5.1 Paper Rewriter</h1>
+        <h1>🎯 YOLOv3-Style GPT-5.1 Paper Rewriter</h1>
         <p>Multi-agent pipeline for honest, accessible academic paper rewrites</p>
       </header>
       

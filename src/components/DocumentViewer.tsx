@@ -46,7 +46,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({ document, isPart
         <div className="empty-state">
           <span className="empty-icon">📄</span>
           <h3>No Document Yet</h3>
-          <p>Enter an arXiv ID and click "Transform Paper" to generate a YOLO-style rewrite.</p>
+          <p>Enter an arXiv ID and click "Transform Paper" to generate a YOLOv3-style rewrite.</p>
         </div>
       </div>
     );

@@ -363,7 +363,7 @@ function buildHTML(
   <article class="arxiv-article">
     <header class="article-header">
       <h1 class="article-title">${escapeHTML(bundle.metadata.title)}</h1>
-      <p class="article-subtitle">YOLO-Style Rewrite</p>
+      <p class="article-subtitle">YOLOv3-Style Rewrite</p>
       <div class="article-authors">
         ${bundle.metadata.authors.map(a => `<span class="author">${escapeHTML(a)}</span>`).join(', ')}
       </div>
@@ -388,21 +388,21 @@ function buildHTML(
         ${externalResearch.authorInfo ? `
         <div class="research-block">
           <h3>👤 About the Authors</h3>
-          <div class="research-content">${escapeHTML(externalResearch.authorInfo)}</div>
+          <div class="research-content">${markdownToHTML(externalResearch.authorInfo)}</div>
         </div>
         ` : ''}
         
         ${externalResearch.relatedDiscussions ? `
         <div class="research-block">
           <h3>💬 Community Discussions</h3>
-          <div class="research-content">${escapeHTML(externalResearch.relatedDiscussions)}</div>
+          <div class="research-content">${markdownToHTML(externalResearch.relatedDiscussions)}</div>
         </div>
         ` : ''}
         
         ${externalResearch.practicalApplications ? `
         <div class="research-block">
           <h3>🔧 Practical Applications</h3>
-          <div class="research-content">${escapeHTML(externalResearch.practicalApplications)}</div>
+          <div class="research-content">${markdownToHTML(externalResearch.practicalApplications)}</div>
         </div>
         ` : ''}
         
@@ -437,7 +437,7 @@ function buildHTML(
     </main>
     
     <footer class="article-footer">
-      <p>Generated using YOLO-Style Paper Rewriter</p>
+      <p>Generated using YOLOv3-Style Paper Rewriter</p>
       <p>Original work by: ${bundle.metadata.authors.join(', ')}</p>
     </footer>
   </article>
@@ -661,6 +661,95 @@ function escapeHTML(text: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * Convert markdown-style text to HTML for research content
+ * Handles: links, bold, italic, bullet lists, numbered lists, headers, line breaks
+ */
+function markdownToHTML(text: string): string {
+  let html = escapeHTML(text);
+  
+  // Convert markdown links [text](url) to HTML links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  
+  // Convert **bold** and __bold__
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  
+  // Convert *italic* and _italic_ (but not inside URLs which have underscores)
+  html = html.replace(/(?<![a-zA-Z0-9])\*([^*]+)\*(?![a-zA-Z0-9])/g, '<em>$1</em>');
+  
+  // Convert `code` to <code>
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Convert headers (### Header)
+  html = html.replace(/^#### (.+)$/gm, '<h5>$1</h5>');
+  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>');
+  
+  // Convert horizontal rules
+  html = html.replace(/^---+$/gm, '<hr>');
+  
+  // Convert bullet lists (- item or * item)
+  // First, identify list blocks and wrap them
+  const lines = html.split('\n');
+  const result: string[] = [];
+  let inList = false;
+  let listType: 'ul' | 'ol' | null = null;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const bulletMatch = line.match(/^[\s]*[-*•]\s+(.+)$/);
+    const numberedMatch = line.match(/^[\s]*(\d+)\.\s+(.+)$/);
+    
+    if (bulletMatch) {
+      if (!inList || listType !== 'ul') {
+        if (inList) result.push(listType === 'ol' ? '</ol>' : '</ul>');
+        result.push('<ul class="research-list">');
+        inList = true;
+        listType = 'ul';
+      }
+      result.push(`<li>${bulletMatch[1]}</li>`);
+    } else if (numberedMatch) {
+      if (!inList || listType !== 'ol') {
+        if (inList) result.push(listType === 'ol' ? '</ol>' : '</ul>');
+        result.push('<ol class="research-list">');
+        inList = true;
+        listType = 'ol';
+      }
+      result.push(`<li>${numberedMatch[2]}</li>`);
+    } else {
+      if (inList) {
+        result.push(listType === 'ol' ? '</ol>' : '</ul>');
+        inList = false;
+        listType = null;
+      }
+      // Convert double newlines to paragraphs, single newlines to <br>
+      if (line.trim() === '') {
+        result.push('</p><p>');
+      } else {
+        result.push(line);
+      }
+    }
+  }
+  
+  if (inList) {
+    result.push(listType === 'ol' ? '</ol>' : '</ul>');
+  }
+  
+  html = '<p>' + result.join('\n') + '</p>';
+  
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '');
+  html = html.replace(/<p>\s*<(ul|ol)/g, '<$1');
+  html = html.replace(/<\/(ul|ol)>\s*<\/p>/g, '</$1>');
+  html = html.replace(/<p>\s*<h/g, '<h');
+  html = html.replace(/<\/h(\d)>\s*<\/p>/g, '</h$1>');
+  html = html.replace(/<p>\s*<hr>/g, '<hr>');
+  html = html.replace(/<hr>\s*<\/p>/g, '<hr>');
+  
+  return html;
 }
 
 /**
@@ -927,8 +1016,52 @@ function getArxivStyleCSS(): string {
     
     .research-content {
       color: #444;
-      line-height: 1.6;
-      white-space: pre-wrap;
+      line-height: 1.7;
+    }
+    
+    .research-content p {
+      margin: 0.6em 0;
+    }
+    
+    .research-content h4, .research-content h5 {
+      margin: 1em 0 0.5em 0;
+      color: #333;
+    }
+    
+    .research-content a {
+      color: var(--accent-color);
+      text-decoration: none;
+    }
+    
+    .research-content a:hover {
+      text-decoration: underline;
+    }
+    
+    .research-content code {
+      background: #f1f5f9;
+      padding: 0.1em 0.4em;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+    
+    .research-content strong {
+      color: #333;
+    }
+    
+    .research-list {
+      margin: 0.8em 0;
+      padding-left: 1.5em;
+    }
+    
+    .research-list li {
+      margin: 0.4em 0;
+      line-height: 1.5;
+    }
+    
+    .research-content hr {
+      border: none;
+      border-top: 1px solid #ddd;
+      margin: 1em 0;
     }
     
     .external-sources {
@@ -1091,7 +1224,7 @@ generated: ${doc.meta.generationDate}
 
 # ${doc.meta.title}
 
-**YOLO-Style Rewrite**
+**YOLOv3-Style Rewrite**
 
 Original: [arXiv:${doc.meta.arxivId}](https://arxiv.org/abs/${doc.meta.arxivId})
 
